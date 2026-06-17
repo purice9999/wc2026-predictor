@@ -1,7 +1,5 @@
 {
-  "buildCommand": "cd frontend && npm run build",
+  "buildCommand": "cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
-  "env": {
-    "VITE_API_BASE_URL": "@VITE_API_BASE_URL"
-  }
+  "installCommand": "echo skip-root-install"
 }
