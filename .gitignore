@@ -29,8 +29,9 @@ frontend/.env.local
 frontend/.env
 
 # Dev server logs (generated at runtime)
-*.txt
-!README*.txt
+uvicorn*.txt
+frontend_*.txt
+server_out.txt
 
 # IDE / OS
 .vscode/
