@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: wc2026-predictor-api
+    env: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: CORS_ALLOW_ALL
+        value: "true"
+      - key: N_SIMULATIONS
+        value: "10000"
+      - key: TRAINING_YEARS
+        value: "4"
