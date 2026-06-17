@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -63,9 +64,15 @@ def _freeze_all_known(fps, ensemble) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Run all blocking I/O and CPU work in a thread pool so the event loop
+    # stays responsive (uvicorn can answer health checks while training).
+    loop = asyncio.get_running_loop()
     logger.info("WC 2026 Predictor backend starting up…")
-    dc, elo, xgb = load_or_train(settings)
-    calibrator = load_or_train_calibrator(dc, settings)
+
+    dc, elo, xgb = await loop.run_in_executor(None, load_or_train, settings)
+    calibrator = await loop.run_in_executor(
+        None, load_or_train_calibrator, dc, settings
+    )
     app.state.dc_model = dc
     app.state.elo_model = elo
     app.state.xgb_model = xgb
@@ -84,7 +91,7 @@ async def lifespan(app: FastAPI):
     try:
         fps = FrozenPredictionService(settings.frozen_predictions_path)
         app.state.frozen_predictions = fps
-        _freeze_all_known(fps, app.state.ensemble)
+        await loop.run_in_executor(None, _freeze_all_known, fps, app.state.ensemble)
     except Exception as exc:
         logger.warning("FrozenPredictions init failed (%s); tracking dezactivat.", exc)
         from app.services.frozen_predictions import FrozenPredictionService as _FPS
@@ -95,7 +102,7 @@ async def lifespan(app: FastAPI):
         app.state.frozen_predictions._lock = threading.Lock()
 
     try:
-        real_matches = get_real_results(force=False)
+        real_matches = await loop.run_in_executor(None, get_real_results, False)
         app.state.real_results = match_real_to_fixture(real_matches, FIXTURES_BY_ID)
         logger.info(
             "Tracking: %d înghețate, %d rezultate reale.",
