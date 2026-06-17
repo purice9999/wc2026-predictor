@@ -8,9 +8,12 @@ venv/
 *.pyd
 *.pdb
 
-# Backend — generated cache (model pickles, data CSV, frozen predictions)
+# Backend — exclude generated data/results, keep model pkl (pre-trained)
 backend/cache/
-backend/.cache/
+backend/.cache/*.csv
+backend/.cache/*.json
+backend/.cache/*.jsonl
+backend/.cache/xg/
 
 # Backend env
 backend/.env
