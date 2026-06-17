@@ -40,7 +40,7 @@ export default function Navbar() {
             </NavLink>
           ))}
           <a
-            href="http://localhost:8000/admin"
+            href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}/admin`}
             target="_blank"
             rel="noreferrer"
             className="ml-2 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-500 hover:text-white hover:bg-navy-700 transition-colors"

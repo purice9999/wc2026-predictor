@@ -141,16 +141,23 @@ app = FastAPI(
 )
 
 # Gate: return 503 for all non-meta endpoints while model is loading
-_ALWAYS_OPEN = {"/health", "/docs", "/openapi.json", "/redoc"}
+_ALWAYS_OPEN = {"/health", "/docs", "/openapi.json", "/redoc", "/admin"}
+_CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "*",
+    "Retry-After": "30",
+}
 
 @app.middleware("http")
 async def startup_gate(request: Request, call_next):
     if not getattr(request.app.state, "ready", False):
-        if request.url.path not in _ALWAYS_OPEN:
+        path = request.url.path
+        if not any(path == p or path.startswith("/static") for p in _ALWAYS_OPEN):
             return JSONResponse(
                 status_code=503,
                 content={"status": "loading", "message": "Model initializing — retry in 30s"},
-                headers={"Retry-After": "30"},
+                headers=_CORS_HEADERS,
             )
     return await call_next(request)
 
