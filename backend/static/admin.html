@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WC 2026 — Results Admin</title>
+<style>
+:root {
+  --bg: #0A0E1A; --card: #131826; --border: #1E293B;
+  --cyan: #22D3EE; --amber: #F5C518; --text: #E2E8F0;
+  --muted: #64748B; --green: #34D399; --red: #F87171;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; }
+.header { background: var(--card); border-bottom: 1px solid var(--border); padding: 16px 24px; display: flex; align-items: center; gap: 16px; }
+.header h1 { color: var(--cyan); font-size: 1.25rem; font-weight: 700; }
+.header .subtitle { color: var(--muted); font-size: 0.8rem; }
+.main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.stats { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; min-width: 130px; }
+.stat-label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; }
+.stat-value { color: var(--cyan); font-size: 1.8rem; font-weight: 700; margin-top: 2px; }
+.stat-value.green { color: var(--green); }
+.controls { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: center; }
+select, input[type=text] {
+  background: var(--card); border: 1px solid var(--border); color: var(--text);
+  padding: 7px 12px; border-radius: 6px; font-size: 0.85rem; cursor: pointer;
+}
+select:focus, input:focus { outline: 1px solid var(--cyan); border-color: var(--cyan); }
+.btn-refresh { background: transparent; border: 1px solid var(--cyan); color: var(--cyan); padding: 7px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+.btn-refresh:hover { background: rgba(34,211,238,0.1); }
+.section-date { padding: 8px 14px; background: rgba(255,255,255,0.02); color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.1em; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; padding: 9px 14px; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+td { padding: 10px 14px; border-bottom: 1px solid rgba(30,41,59,0.5); vertical-align: middle; font-size: 0.875rem; }
+tr.match-row:hover td { background: rgba(255,255,255,0.02); }
+.team-name { font-weight: 600; }
+.vs { color: var(--muted); margin: 0 6px; }
+.prob { font-size: 0.78rem; }
+.prob-h { color: #22D3EE; }
+.prob-d { color: var(--muted); }
+.prob-a { color: #F472B6; }
+.score-form { display: flex; align-items: center; gap: 6px; }
+.score-box { width: 44px; background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 5px; border-radius: 5px; text-align: center; font-size: 0.9rem; font-weight: 600; }
+.score-box:focus { outline: 1px solid var(--cyan); border-color: var(--cyan); }
+.btn-save { background: var(--cyan); color: #0A0E1A; border: none; padding: 5px 12px; border-radius: 5px; cursor: pointer; font-size: 0.78rem; font-weight: 700; }
+.btn-save:hover { opacity: 0.85; }
+.btn-del { background: transparent; color: var(--red); border: 1px solid rgba(248,113,113,0.4); padding: 4px 8px; border-radius: 5px; cursor: pointer; font-size: 0.72rem; }
+.btn-del:hover { background: rgba(248,113,113,0.1); }
+.actual { color: var(--amber); font-weight: 700; font-size: 1rem; }
+.badge { padding: 2px 9px; border-radius: 999px; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.04em; }
+.badge-ok  { background: rgba(52,211,153,0.15); color: var(--green); }
+.badge-err { background: rgba(248,113,113,0.15); color: var(--red); }
+.badge-pend{ background: rgba(100,116,139,0.15); color: var(--muted); }
+.tbd { color: var(--muted); font-style: italic; font-size: 0.8rem; }
+.toast { position: fixed; bottom: 24px; right: 24px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 18px; font-size: 0.85rem; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.toast.ok { border-left: 3px solid var(--green); }
+.toast.err { border-left: 3px solid var(--red); }
+.predicted-winner { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+.btn-retrain { background: #7C3AED; color: #fff; border: none; padding: 7px 16px; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-weight: 700; }
+.btn-retrain:hover { opacity: 0.85; }
+.btn-retrain:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>WC 2026 — Results Tracker</h1>
+    <div class="subtitle">Record actual match scores &amp; track prediction accuracy</div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Matches Played</div><div class="stat-value" id="s-played">—</div></div>
+    <div class="stat"><div class="stat-label">Correct Picks</div><div class="stat-value green" id="s-correct">—</div></div>
+    <div class="stat"><div class="stat-label">Accuracy</div><div class="stat-value" id="s-acc">—</div></div>
+    <div class="stat"><div class="stat-label">With Prediction</div><div class="stat-value" id="s-pred">—</div></div>
+  </div>
+
+  <div class="controls">
+    <select id="filter-group" onchange="render()">
+      <option value="">All matches</option>
+      <option value="A">Group A</option><option value="B">Group B</option>
+      <option value="C">Group C</option><option value="D">Group D</option>
+      <option value="E">Group E</option><option value="F">Group F</option>
+      <option value="G">Group G</option><option value="H">Group H</option>
+      <option value="I">Group I</option><option value="J">Group J</option>
+      <option value="K">Group K</option><option value="L">Group L</option>
+      <option value="KO">Knockout</option>
+    </select>
+    <select id="filter-status" onchange="render()">
+      <option value="">All statuses</option>
+      <option value="finished">Finished (today or past)</option>
+      <option value="recorded">Recorded results only</option>
+      <option value="pending">Pending (no result yet)</option>
+    </select>
+    <button class="btn-refresh" onclick="load()">Refresh</button>
+    <button class="btn-retrain" id="btn-retrain" onclick="retrain()">🔄 Retrenează Modelul</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:80px">Time</th>
+        <th>Match</th>
+        <th>Prediction (H / D / A)</th>
+        <th>Actual</th>
+        <th>Enter Score</th>
+        <th>Result</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let MATCHES = [];
+let RESULTS = {};
+let PREDS = {};
+
+async function load() {
+  const [mr, rr] = await Promise.all([
+    fetch('/matches?limit=200').then(r => r.json()).catch(() => ({ matches: [] })),
+    fetch('/results').then(r => r.json()).catch(() => [])
+  ]);
+  MATCHES = mr.matches || [];
+  RESULTS = {};
+  rr.forEach(r => { RESULTS[r.match_id] = r; });
+
+  // Load predictions for group stage in background
+  const toLoad = MATCHES.filter(m => m.group && m.home_team !== 'TBD' && !PREDS[m.match_id]);
+  await Promise.all(toLoad.map(m =>
+    fetch('/predict/' + m.match_id).then(r => r.json())
+      .then(p => { PREDS[m.match_id] = p; })
+      .catch(() => {})
+  ));
+
+  updateStats();
+  render();
+}
+
+function updateStats() {
+  fetch('/results/accuracy').then(r => r.json()).then(a => {
+    document.getElementById('s-played').textContent = a.total;
+    document.getElementById('s-correct').textContent = a.correct;
+    document.getElementById('s-acc').textContent = a.with_prediction > 0
+      ? (a.accuracy * 100).toFixed(0) + '%' : '—';
+    document.getElementById('s-pred').textContent = a.with_prediction;
+  });
+}
+
+function render() {
+  const grp = document.getElementById('filter-group').value;
+  const sts = document.getElementById('filter-status').value;
+  const today = new Date().toISOString().slice(0, 10);
+
+  let rows = MATCHES;
+  if (grp === 'KO') rows = rows.filter(m => !m.group);
+  else if (grp) rows = rows.filter(m => m.group === grp);
+  if (sts === 'finished') rows = rows.filter(m => m.date <= today);
+  if (sts === 'recorded') rows = rows.filter(m => RESULTS[m.match_id]);
+  if (sts === 'pending') rows = rows.filter(m => !RESULTS[m.match_id]);
+
+  // Group by date
+  const byDate = {};
+  rows.forEach(m => {
+    if (!byDate[m.date]) byDate[m.date] = [];
+    byDate[m.date].push(m);
+  });
+
+  let html = '';
+  const dates = Object.keys(byDate).sort();
+  if (!dates.length) {
+    html = '<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--muted)">No matches</td></tr>';
+  }
+  dates.forEach(d => {
+    html += `<tr><td colspan="6" class="section-date">${fmtDate(d)}</td></tr>`;
+    byDate[d].forEach(m => {
+      const res = RESULTS[m.match_id];
+      const pred = PREDS[m.match_id];
+      const tbd = m.home_team === 'TBD';
+
+      const predHtml = pred
+        ? `<span class="prob prob-h">${pct(pred.prob_home)}</span> <span class="prob prob-d">${pct(pred.prob_draw)}</span> <span class="prob prob-a">${pct(pred.prob_away)}</span>`
+        : (tbd ? '' : '<span style="color:var(--muted);font-size:0.75rem">loading…</span>');
+
+      const predWinner = res && res.predicted_winner
+        ? `<div class="predicted-winner">Model pick: <b>${res.predicted_winner}</b></div>` : '';
+
+      const actualHtml = res ? `<span class="actual">${res.home_score}–${res.away_score}</span>` : '—';
+
+      let badge = '<span class="badge badge-pend">Pending</span>';
+      if (res) badge = res.correct === true
+        ? '<span class="badge badge-ok">✓ Correct</span>'
+        : (res.correct === false ? '<span class="badge badge-err">✗ Wrong</span>'
+        : '<span class="badge badge-pend">No pred</span>');
+
+      const form = tbd ? '<span class="tbd">TBD</span>' : `
+        <div class="score-form">
+          <input class="score-box" type="number" min="0" max="20" id="h-${m.match_id}" placeholder="H" value="${res ? res.home_score : ''}">
+          <span style="color:var(--muted)">–</span>
+          <input class="score-box" type="number" min="0" max="20" id="a-${m.match_id}" placeholder="A" value="${res ? res.away_score : ''}">
+          <button class="btn-save" onclick="save('${m.match_id}')">Save</button>
+          ${res ? `<button class="btn-del" onclick="del('${m.match_id}')">✕</button>` : ''}
+        </div>`;
+
+      html += `<tr class="match-row">
+        <td style="color:var(--muted);font-size:0.78rem">${m.time}<br><span style="font-size:0.68rem">${m.group ? 'Group ' + m.group + ' MD' + m.matchday : m.stage}</span></td>
+        <td><span class="team-name">${m.home_team}</span><span class="vs">vs</span><span class="team-name">${m.away_team}</span></td>
+        <td>${predHtml}${predWinner}</td>
+        <td>${actualHtml}</td>
+        <td>${form}</td>
+        <td>${badge}</td>
+      </tr>`;
+    });
+  });
+
+  document.getElementById('tbody').innerHTML = html;
+}
+
+async function save(id) {
+  const h = parseInt(document.getElementById('h-' + id).value);
+  const a = parseInt(document.getElementById('a-' + id).value);
+  if (isNaN(h) || isNaN(a) || h < 0 || a < 0) { toast('Enter valid scores (0–20)', 'err'); return; }
+  const r = await fetch('/results/' + id, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ home_score: h, away_score: a })
+  });
+  if (r.ok) {
+    RESULTS[id] = await r.json();
+    toast('Result saved', 'ok');
+    updateStats();
+    render();
+  } else { toast('Error saving result', 'err'); }
+}
+
+async function del(id) {
+  if (!confirm('Remove result for ' + id + '?')) return;
+  const r = await fetch('/results/' + id, { method: 'DELETE' });
+  if (r.ok) { delete RESULTS[id]; toast('Result removed', 'ok'); updateStats(); render(); }
+  else { toast('Error', 'err'); }
+}
+
+function pct(v) { return (v * 100).toFixed(0) + '%'; }
+function fmtDate(d) {
+  return new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+let toastTimer;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 2500);
+}
+
+async function retrain() {
+  const btn = document.getElementById('btn-retrain');
+  btn.disabled = true;
+  btn.textContent = '⏳ Se antrenează... (~60-90s)';
+  toast('Reantrenare în curs — durează ~60-90 secunde...', 'ok');
+  try {
+    const r = await fetch('/admin/retrain', { method: 'POST' });
+    const data = await r.json();
+    if (data.status === 'ok') {
+      const acc = data.accuracy;
+      toast(`✅ Gata! Antrenat pe ${data.trained_on} meciuri. Acuratețe: ${(acc.accuracy*100).toFixed(0)}% (${acc.correct}/${acc.with_prediction})`, 'ok');
+      // Reload to show fresh predictions
+      await load();
+    } else if (data.status === 'skipped') {
+      toast('⚠️ ' + data.message, 'err');
+    } else {
+      toast('❌ Eroare: ' + (data.message || 'necunoscută'), 'err');
+    }
+  } catch (e) {
+    toast('❌ Conexiune eșuată', 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '🔄 Retrenează Modelul';
+}
+
+load();
+</script>
+</body>
+</html>

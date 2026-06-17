@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+*.pyd
+*.pdb
+
+# Backend — generated cache (model pickles, data CSV, frozen predictions)
+backend/cache/
+backend/.cache/
+
+# Backend env
+backend/.env
+.env
+*.env
+
+# Frontend
+frontend/node_modules/
+node_modules/
+frontend/dist/
+dist/
+build/
+frontend/.vite/
+.vite/
+frontend/.env.local
+frontend/.env
+
+# Dev server logs (generated at runtime)
+*.txt
+!README*.txt
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
