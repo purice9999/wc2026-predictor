@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
@@ -32,17 +33,12 @@ logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent.parent / "static"
 
-# Versiunea aplicației — sursă unică
 APP_VERSION = "0.5.0"
 
 
 def _freeze_all_known(fps, ensemble) -> None:
-    """Îngheață predicțiile pentru toate meciurile cu echipe cunoscute (non-TBD).
-    Operație idempotentă: nu suprascrie predicții deja salvate.
-    """
-    frozen_new = 0
-    skipped = 0
-    errors = 0
+    """Idempotent: skip already-frozen, wrap each predict in try/except."""
+    frozen_new = skipped = errors = 0
     for fid, fx in FIXTURES_BY_ID.items():
         if fx.get("home_team") == "TBD" or fx.get("away_team") == "TBD":
             continue
@@ -56,63 +52,80 @@ def _freeze_all_known(fps, ensemble) -> None:
         except Exception as exc:
             logger.debug("Freeze skip %s: %s", fid, exc)
             errors += 1
-    logger.info(
-        "Freeze predicții: %d noi, %d existente, %d erori.",
-        frozen_new, skipped, errors,
-    )
+    logger.info("Freeze: %d noi, %d existente, %d erori.", frozen_new, skipped, errors)
+
+
+async def _background_init(app: FastAPI) -> None:
+    """Load model and supporting data in background — server responds to HTTP immediately."""
+    loop = asyncio.get_running_loop()
+    try:
+        logger.info("WC 2026 Predictor — background init starting…")
+
+        dc, elo, xgb = await loop.run_in_executor(None, load_or_train, settings)
+        calibrator = await loop.run_in_executor(None, load_or_train_calibrator, dc, settings)
+
+        app.state.dc_model = dc
+        app.state.elo_model = elo
+        app.state.xgb_model = xgb
+        app.state.calibrator = calibrator
+        app.state.ensemble = build_ensemble(
+            dc, elo,
+            w_dc=settings.w_dc, w_elo=settings.w_elo, w_xgb=settings.w_xgb,
+            xgb=xgb,
+            calibrator=calibrator,
+        )
+        app.state.prediction_cache = {}
+        app.state.result_service = ResultService(settings.results_path)
+
+        try:
+            fps = FrozenPredictionService(settings.frozen_predictions_path)
+            app.state.frozen_predictions = fps
+            await loop.run_in_executor(None, _freeze_all_known, fps, app.state.ensemble)
+        except Exception as exc:
+            logger.warning("FrozenPredictions init failed (%s); tracking dezactivat.", exc)
+            fps = FrozenPredictionService.__new__(FrozenPredictionService)
+            fps._data = {}
+            fps._path = Path(settings.frozen_predictions_path)
+            fps._lock = threading.Lock()
+            app.state.frozen_predictions = fps
+
+        try:
+            real_matches = await loop.run_in_executor(None, get_real_results, False)
+            app.state.real_results = match_real_to_fixture(real_matches, FIXTURES_BY_ID)
+            logger.info(
+                "Tracking: %d înghețate, %d rezultate reale.",
+                app.state.frozen_predictions.count(), len(app.state.real_results),
+            )
+        except Exception as exc:
+            logger.warning("Real results fetch failed (%s).", exc)
+            app.state.real_results = {}
+
+        app.state.ready = True
+        logger.info("Background init complete: %s", app.state.ensemble.model_label)
+
+    except Exception as exc:
+        logger.error("Background init FAILED: %s", exc, exc_info=True)
+        app.state.ready = False
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Run all blocking I/O and CPU work in a thread pool so the event loop
-    # stays responsive (uvicorn can answer health checks while training).
-    loop = asyncio.get_running_loop()
-    logger.info("WC 2026 Predictor backend starting up…")
+    # Pre-set safe defaults so state attrs always exist
+    app.state.ready = False
+    app.state.ensemble = None
+    app.state.result_service = None
+    app.state.prediction_cache = {}
+    app.state.real_results = {}
+    # Minimal frozen predictions stub so /tracking doesn't crash during init
+    fps_stub = FrozenPredictionService.__new__(FrozenPredictionService)
+    fps_stub._data = {}
+    fps_stub._path = Path(settings.frozen_predictions_path)
+    fps_stub._lock = threading.Lock()
+    app.state.frozen_predictions = fps_stub
 
-    dc, elo, xgb = await loop.run_in_executor(None, load_or_train, settings)
-    calibrator = await loop.run_in_executor(
-        None, load_or_train_calibrator, dc, settings
-    )
-    app.state.dc_model = dc
-    app.state.elo_model = elo
-    app.state.xgb_model = xgb
-    app.state.calibrator = calibrator
-    app.state.ensemble = build_ensemble(
-        dc, elo,
-        w_dc=settings.w_dc, w_elo=settings.w_elo, w_xgb=settings.w_xgb,
-        xgb=xgb,
-        calibrator=calibrator,
-    )
-    app.state.prediction_cache: dict = {}
-    app.state.result_service = ResultService(settings.results_path)
+    # Kick off model loading in background — lifespan yields immediately
+    asyncio.create_task(_background_init(app))
 
-    # Live tracking: predicții înghețate + rezultate reale
-    # Eșuează elegant — nu blochează pornirea serverului
-    try:
-        fps = FrozenPredictionService(settings.frozen_predictions_path)
-        app.state.frozen_predictions = fps
-        await loop.run_in_executor(None, _freeze_all_known, fps, app.state.ensemble)
-    except Exception as exc:
-        logger.warning("FrozenPredictions init failed (%s); tracking dezactivat.", exc)
-        from app.services.frozen_predictions import FrozenPredictionService as _FPS
-        app.state.frozen_predictions = _FPS.__new__(_FPS)
-        app.state.frozen_predictions._data = {}
-        app.state.frozen_predictions._path = Path(settings.frozen_predictions_path)
-        import threading
-        app.state.frozen_predictions._lock = threading.Lock()
-
-    try:
-        real_matches = await loop.run_in_executor(None, get_real_results, False)
-        app.state.real_results = match_real_to_fixture(real_matches, FIXTURES_BY_ID)
-        logger.info(
-            "Tracking: %d înghețate, %d rezultate reale.",
-            app.state.frozen_predictions.count(), len(app.state.real_results),
-        )
-    except Exception as exc:
-        logger.warning("Real results fetch failed (%s); tracking va returna date goale.", exc)
-        app.state.real_results = {}
-
-    logger.info("Ensemble ready: %s", app.state.ensemble.model_label)
     yield
     logger.info("Backend shutting down.")
 
@@ -127,6 +140,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Gate: return 503 for all non-meta endpoints while model is loading
+_ALWAYS_OPEN = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+@app.middleware("http")
+async def startup_gate(request: Request, call_next):
+    if not getattr(request.app.state, "ready", False):
+        if request.url.path not in _ALWAYS_OPEN:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "loading", "message": "Model initializing — retry in 30s"},
+                headers={"Retry-After": "30"},
+            )
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"] if settings.cors_allow_all else settings.cors_origins,
@@ -135,7 +162,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files (admin page assets)
 if _STATIC_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
@@ -148,10 +174,15 @@ app.include_router(tracking_router.router)
 
 @app.get("/admin", include_in_schema=False)
 def admin_page() -> FileResponse:
-    """Serve the match results admin page."""
     return FileResponse(str(_STATIC_DIR / "admin.html"))
 
 
 @app.get("/health", tags=["health"])
 def health() -> dict:
-    return {"status": "ok", "version": APP_VERSION, "model": "DC+Isotonic"}
+    ready = getattr(app.state, "ready", False)
+    ensemble = getattr(app.state, "ensemble", None)
+    return {
+        "status": "ok" if ready else "loading",
+        "version": APP_VERSION,
+        "model": ensemble.model_label if ensemble else "initializing",
+    }
